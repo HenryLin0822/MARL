@@ -1,0 +1,63 @@
+# Configuration for Sable training on MAgentX Combined Arms environment
+
+env_config:
+  map_size: 16                    # Size of the battlefield (16x16 grid)
+  minimap_mode: false             # Use local observations only
+  step_reward: -0.005             # Small negative reward per step (encourages quick resolution)
+  dead_penalty: -0.1              # Penalty when an agent dies
+  attack_penalty: -0.1            # Penalty for attacking (prevents spam)
+  attack_opponent_reward: 0.2     # Reward for successfully attacking opponents
+  max_cycles: 1000                # Maximum steps per episode
+  extra_features: false           # Simplified observation space
+
+training_config:
+  # PPO hyperparameters
+  learning_rate: 3e-4             # Learning rate for policy and value networks
+  gamma: 0.99                     # Discount factor for future rewards
+  gae_lambda: 0.95                # GAE lambda parameter for advantage estimation
+  clip_epsilon: 0.2               # PPO clipping parameter
+  entropy_coef: 0.01              # Entropy regularization coefficient
+  value_coef: 0.5                 # Value loss coefficient
+  max_grad_norm: 0.5              # Maximum gradient norm for clipping
+  
+  # Training schedule
+  n_episodes: 2000                # Total number of episodes to train
+  max_steps_per_episode: 1000     # Maximum steps per episode
+  update_frequency: 20            # Update policies every N episodes
+  n_epochs: 4                     # Number of optimization epochs per update
+  batch_size: 64                  # Batch size for policy updates
+  
+  # Logging and saving
+  save_frequency: 200             # Save checkpoints every N episodes
+  log_frequency: 20               # Log progress every N episodes
+  save_dir: "checkpoints/magent_sable"  # Directory to save checkpoints
+  
+  # Sable network configuration
+  policy_config:
+    n_agents_per_team: 4          # Number of agents per team (red/blue)
+    embed_dim: 128                # Embedding dimension for Sable network
+    n_head: 8                     # Number of attention heads in multi-scale retention
+    n_block: 3                    # Number of Sable blocks (encoder/decoder layers)
+    chunk_size: 4                 # Chunk size for retention mechanism
+    decay_scaling_factor: 1.0     # Scaling factor for temporal decay rates
+
+# Advanced training options (optional)
+advanced_config:
+  # Team-specific learning rates (if different rates are desired)
+  red_learning_rate: null         # null means use main learning_rate
+  blue_learning_rate: null        # null means use main learning_rate
+  
+  # Experience replay settings
+  buffer_size: 10000              # Maximum size of experience buffer
+  prioritized_replay: false       # Whether to use prioritized experience replay
+  
+  # Curriculum learning
+  curriculum_learning: false      # Whether to use curriculum learning
+  curriculum_stages: []           # List of curriculum stages
+  
+  # Multi-processing
+  n_workers: 1                    # Number of parallel workers for data collection
+  
+  # Evaluation
+  eval_frequency: 100             # Evaluate policy every N episodes
+  eval_episodes: 10               # Number of episodes for evaluation
