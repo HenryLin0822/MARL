@@ -274,10 +274,66 @@ MARL/
 ## Environment Configuration
 
 ### Reward Structure
-- **Step reward**: -0.005 (encourages quick resolution)
-- **Death penalty**: -0.1 (discourages reckless behavior)  
-- **Attack penalty**: -0.1 (prevents spam attacking)
-- **Opponent kill reward**: +0.2 (encourages combat engagement)
+
+The Combined Arms v6 environment uses a comprehensive reward system designed to encourage tactical combat behavior while balancing aggression and survival. Rewards are **additive**, meaning multiple reward conditions can apply simultaneously in a single time step.
+
+#### Core Reward Components
+
+| Reward Type | Value | Parameter | Description |
+|-------------|-------|-----------|-------------|
+| **Step Reward** | -0.005 | `step_reward` | Small penalty each time step to encourage quick mission completion |
+| **Death Penalty** | -0.1 | `dead_penalty` | Penalty when an agent dies, discouraging reckless behavior |
+| **Attack Penalty** | -0.1 | `attack_penalty` | Cost for making any attack, preventing spam attacking |
+| **Opponent Kill Reward** | +0.2 | `attack_opponent_reward` | Reward for successfully killing an enemy agent |
+| **Major Kill Bonus** | +5.0 | *(fixed)* | Large bonus for eliminating an opponent (from magent2 core) |
+
+#### Reward Calculation Logic
+
+```python
+# Example reward calculation for a single time step:
+total_reward = 0
+
+# Every time step
+total_reward += step_reward  # -0.005
+
+# If agent attacks (regardless of target)
+if agent_attacks:
+    total_reward += attack_penalty  # -0.1
+
+# If agent attacks an opponent 
+if attacks_opponent:
+    total_reward += attack_opponent_reward  # +0.2
+
+# If agent kills an opponent
+if kills_opponent:
+    total_reward += 5.0  # Major kill bonus
+
+# If agent dies
+if agent_dies:
+    total_reward += dead_penalty  # -0.1
+```
+
+#### Strategic Implications
+
+- **Combat Engagement**: Net positive reward (+5.1) for successfully killing an opponent
+- **Attack Decision**: Attacking opponents gives net +0.1 reward, while attacking teammates gives net -0.1
+- **Survival Focus**: Death penalty encourages defensive positioning and tactical awareness  
+- **Time Pressure**: Step penalty creates urgency to complete objectives efficiently
+- **Resource Management**: Attack penalty makes agents selective about when to engage
+
+#### Reward Customization
+
+All reward values can be customized when creating the environment:
+
+```python
+env = combined_arms_v6.parallel_env(
+    step_reward=-0.01,           # Increase time pressure
+    dead_penalty=-0.2,           # Stronger survival incentive  
+    attack_penalty=-0.05,        # Lower attack cost
+    attack_opponent_reward=0.3,  # Higher engagement reward
+    # ... other parameters
+)
+```
 
 ### Technical Settings
 - **Parallel environment**: Simultaneous agent actions
