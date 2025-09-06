@@ -6,7 +6,7 @@ from collections import defaultdict, deque
 import argparse
 from magent2.environments import combined_arms_v6
 from DQN import MultiAgentDQNPolicy
-
+from tqdm import tqdm
 class MADQNTrainer:
     def __init__(self, config):
         self.config = config
@@ -53,7 +53,7 @@ class MADQNTrainer:
         
         best_avg_reward = float('-inf')
         
-        for episode in range(self.config['num_episodes']):
+        for episode in tqdm(range(self.config['num_episodes'])):
             episode_start_time = time.time()
             
             # Reset environment
@@ -277,7 +277,7 @@ def get_default_config():
 
 def main():
     parser = argparse.ArgumentParser(description='Train Multi-Agent DQN on Combat Environment')
-    parser.add_argument('--episodes', type=int, default=2000, help='Number of training episodes')
+    parser.add_argument('--episodes', type=int, default=20, help='Number of training episodes')
     parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate')
     parser.add_argument('--batch-size', type=int, default=64, help='Batch size')
     parser.add_argument('--buffer-size', type=int, default=50000, help='Replay buffer size')

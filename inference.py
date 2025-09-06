@@ -5,6 +5,7 @@ import imageio
 import os
 from magent2.environments import combined_arms_v6
 from DQN import MultiAgentDQNPolicy
+from auto_regressive_model import AutoRegressiveMultiAgentPolicy
 
 def state_to_rgb(state):
     """Convert environment state to RGB image with proper colors
@@ -103,7 +104,7 @@ class RandomPolicy:
             actions[agent_id] = self.get_action(obs, agent_id)
         return actions
 
-def run_inference(num_episodes=1, max_steps=1000, map_size=16, render=False, save_gif=False, gif_path="render/inference_simulation.gif", scale_factor=20, use_dqn=True, training=True, load_models=False):
+def run_inference(num_episodes=1, max_steps=1000, map_size=16, render=False, save_gif=False, gif_path="render/inference_simulation.gif", scale_factor=20, use_dqn=True, training=True, load_models=False, use_autoregressive=False):
     """
     Run inference with the policy
     
@@ -118,6 +119,7 @@ def run_inference(num_episodes=1, max_steps=1000, map_size=16, render=False, sav
         use_dqn: Whether to use DQN policy (True) or random policy (False)
         training: Whether to train the DQN agents during inference
         load_models: Whether to load existing DQN models
+        use_autoregressive: Whether to use autoregressive model instead of regular DQN
     """
     # Create environment
     env = combined_arms_v6.parallel_env(
@@ -132,7 +134,15 @@ def run_inference(num_episodes=1, max_steps=1000, map_size=16, render=False, sav
     )
     
     # Initialize policy
-    if use_dqn:
+    if use_autoregressive:
+        policy = AutoRegressiveMultiAgentPolicy(env)
+        if load_models:
+            policy.load_models()
+            if render:
+                print("Loaded existing autoregressive models")
+        if render:
+            print("Using autoregressive policy with strategy embeddings")
+    elif use_dqn:
         policy = MultiAgentDQNPolicy(env)
         if load_models:
             policy.load_models()
@@ -164,10 +174,14 @@ def run_inference(num_episodes=1, max_steps=1000, map_size=16, render=False, sav
         if render:
             print(f"Starting episode {episode + 1}")
             print(f"Initial agents: {len(env.agents)}")
-            if use_dqn and training:
+            if (use_dqn or use_autoregressive) and training:
                 stats = policy.get_training_stats()
-                avg_epsilon = np.mean([s['epsilon'] for s in stats.values()])
-                print(f"Average epsilon: {avg_epsilon:.3f}")
+                if use_autoregressive:
+                    central_stats = stats['central_policy']
+                    print(f"Epsilon: {central_stats['epsilon']:.3f}")
+                else:
+                    avg_epsilon = np.mean([s['epsilon'] for s in stats.values()])
+                    print(f"Average epsilon: {avg_epsilon:.3f}")
         
         for step in range(max_steps):
             # Capture frame for GIF if requested
@@ -181,7 +195,7 @@ def run_inference(num_episodes=1, max_steps=1000, map_size=16, render=False, sav
                 episode_frames.append(np.array(img_scaled))
             
             # Get actions from policy
-            if use_dqn:
+            if use_autoregressive or use_dqn:
                 actions = policy.get_actions(observations, training=training)
             else:
                 actions = policy.get_actions(observations)
@@ -189,8 +203,8 @@ def run_inference(num_episodes=1, max_steps=1000, map_size=16, render=False, sav
             # Step environment
             next_observations, rewards, terminations, truncations, _ = env.step(actions)
             
-            # Train DQN agents if using DQN and training is enabled
-            if use_dqn and training and prev_observations is not None:
+            # Train agents if using DQN or autoregressive and training is enabled
+            if (use_dqn or use_autoregressive) and training and prev_observations is not None:
                 policy.step(prev_observations, prev_actions, rewards, observations, terminations)
             
             # Store current state for next iteration
@@ -207,10 +221,14 @@ def run_inference(num_episodes=1, max_steps=1000, map_size=16, render=False, sav
                 alive_agents = len([a for a in env.agents if not terminations.get(a, False)])
                 step_reward = sum(rewards.values())
                 print(f"  Step {step}: {alive_agents} agents alive, step reward: {step_reward:.3f}")
-                if use_dqn and training:
+                if (use_dqn or use_autoregressive) and training:
                     stats = policy.get_training_stats()
-                    avg_buffer = np.mean([s['buffer_size'] for s in stats.values()])
-                    print(f"    Avg buffer size: {avg_buffer:.0f}")
+                    if use_autoregressive:
+                        central_stats = stats['central_policy']
+                        print(f"    Epsilon: {central_stats['epsilon']:.3f}, Buffer size: {central_stats['buffer_size']}")
+                    else:
+                        avg_buffer = np.mean([s['buffer_size'] for s in stats.values()])
+                        print(f"    Avg buffer size: {avg_buffer:.0f}")
             
             # Check if episode is done
             if all(terminations.values()) or all(truncations.values()):
@@ -238,11 +256,12 @@ def run_inference(num_episodes=1, max_steps=1000, map_size=16, render=False, sav
             print(f"  Final alive agents: {final_alive}")
             print()
     
-    # Save DQN models if training was enabled
-    if use_dqn and training:
+    # Save models if training was enabled
+    if (use_dqn or use_autoregressive) and training:
         policy.save_models()
         if render:
-            print("DQN models saved to 'models/' directory")
+            model_type = "autoregressive" if use_autoregressive else "DQN"
+            print(f"{model_type} models saved to 'models/' directory")
     
     env.close()
     
@@ -266,23 +285,31 @@ if __name__ == "__main__":
     parser.add_argument("--gif-path", type=str, default="render/inference_simulation.gif", help="Path to save GIF")
     parser.add_argument("--scale-factor", type=int, default=20, help="Scale factor for GIF images")
     parser.add_argument("--use-dqn", action="store_true", help="Use DQN policy instead of random policy")
+    parser.add_argument("--use-autoregressive", action="store_true", help="Use autoregressive policy with strategy embeddings")
     parser.add_argument("--no-training", action="store_true", help="Disable training for DQN (evaluation mode)")
-    parser.add_argument("--load-models", action="store_true", help="Load existing DQN models from 'models/' directory")
+    parser.add_argument("--load-models", action="store_true", help="Load existing models from 'models/' directory")
     
     args = parser.parse_args()
     
     # Determine policy type and training mode
     use_dqn = args.use_dqn
+    use_autoregressive = args.use_autoregressive
     training = not args.no_training
     
-    policy_type = "DQN" if use_dqn else "random"
-    mode = "training" if (use_dqn and training) else "evaluation"
+    if use_autoregressive:
+        policy_type = "autoregressive"
+    elif use_dqn:
+        policy_type = "DQN"
+    else:
+        policy_type = "random"
+    
+    mode = "training" if ((use_dqn or use_autoregressive) and training) else "evaluation"
     
     print(f"Running MARL inference with {policy_type} policy in {mode} mode...")
     if args.save_gif:
         print(f"Will save GIF to: {args.gif_path}")
-    if use_dqn and args.load_models:
-        print("Will attempt to load existing DQN models")
+    if (use_dqn or use_autoregressive) and args.load_models:
+        print(f"Will attempt to load existing {policy_type} models")
     
     # Run inference
     stats = run_inference(
@@ -295,7 +322,8 @@ if __name__ == "__main__":
         scale_factor=args.scale_factor,
         use_dqn=use_dqn,
         training=training,
-        load_models=args.load_models
+        load_models=args.load_models,
+        use_autoregressive=use_autoregressive
     )
     
     # Print summary
