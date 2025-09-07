@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 from magent2.environments import combined_arms_v6
 from magent_sable_policy import MultiTeamSablePolicy, MAgentSablePolicy
 from config import SableConfig
-
+from tqdm import tqdm
 
 class MAgentSableTrainer:
     """
@@ -269,7 +269,7 @@ class MAgentSableTrainer:
         
         os.makedirs(self.save_dir, exist_ok=True)
         
-        for episode in range(self.n_episodes):
+        for episode in tqdm(range(self.n_episodes), desc="Training Progress"):
             # Collect episode
             episode_result = self.collect_episode(episode)
             
