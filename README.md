@@ -58,15 +58,19 @@ for agent_id, obs in observations.items():
 next_obs, rewards, terms, truncs, infos = env.step(actions)
 ```
 
-**Typical Action Categories** (varies by unit type):
-- **Movement**: Up, Down, Left, Right, Stay
-- **Attack**: Attack nearby enemies (direction-based)
-- **Special**: Unit-specific abilities
+**Action Space Specification**:
+- **Discrete Action Space**: Each agent has `Discrete(9)` action space
+- **Total Agents**: 12 agents (6 per team: 3 melee + 3 ranged units each)
+- **Action Categories**: 
+  - **Movement**: 4 directions (Up, Down, Left, Right) + Stay (1 action)
+  - **Attack**: 4 directional attacks (Up, Down, Left, Right)
+  - **Total**: 9 discrete actions per agent
 
 **Action Space Properties**:
 - **Decentralized execution**: No coordination between agents during action selection
 - **Simultaneous processing**: All agent actions are executed at the same timestep
 - **Local decision-making**: Actions based only on agent's partial observation
+- **Individual control**: Each of the 12 agents selects from 9 possible actions independently
 
 ### State Representation
 
