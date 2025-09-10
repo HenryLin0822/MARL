@@ -4,8 +4,38 @@ from PIL import Image
 import imageio
 import os
 from magent2.environments import combined_arms_v6
-from DQN import MultiAgentDQNPolicy
-from auto_regressive_model import AutoRegressiveMultiAgentPolicy
+
+def policy_1(team_observations):
+    """
+    Policy for red team
+    
+    Args:
+        team_observations: Dict of {agent_id: observation} for red team agents
+    
+    Returns:
+        dict: {agent_id: action} for red team agents
+    """
+    team_actions = {}
+    for agent_id, obs in team_observations.items():
+        # Random policy - select action from 0 to 8 (9 total actions)
+        team_actions[agent_id] = random.randint(0, 8)
+    return team_actions
+
+def policy_2(team_observations):
+    """
+    Policy for blue team
+    
+    Args:
+        team_observations: Dict of {agent_id: observation} for blue team agents
+    
+    Returns:
+        dict: {agent_id: action} for blue team agents
+    """
+    team_actions = {}
+    for agent_id, obs in team_observations.items():
+        # Random policy - select action from 0 to 8 (9 total actions)
+        team_actions[agent_id] = random.randint(0, 8)
+    return team_actions
 
 def state_to_rgb(state):
     """Convert environment state to RGB image with proper colors
@@ -69,44 +99,30 @@ def state_to_rgb(state):
     
     return rgb_image
 
-class RandomPolicy:
-    """Simple random policy for multi-agent RL environment"""
-    
-    def __init__(self, env):
-        self.env = env
-    
-    def get_action(self, observation, agent_id):
-        """
-        Get action for a specific agent based on its observation
-        
-        Args:
-            observation: Agent's local observation
-            agent_id: ID of the agent
-            
-        Returns:
-            int: Action to take (0 to action_space.n - 1)
-        """
-        action_space = self.env.action_space(agent_id)
-        return random.randint(0, action_space.n - 1)
-    
-    def get_actions(self, observations):
-        """
-        Get actions for all agents
-        
-        Args:
-            observations: Dict of {agent_id: observation}
-            
-        Returns:
-            dict: {agent_id: action}
-        """
-        actions = {}
-        for agent_id, obs in observations.items():
-            actions[agent_id] = self.get_action(obs, agent_id)
-        return actions
-
-def run_inference(num_episodes=1, max_steps=1000, map_size=16, render=False, save_gif=False, gif_path="render/inference_simulation.gif", scale_factor=20, use_dqn=True, training=True, load_models=False, use_autoregressive=False):
+def separate_teams(observations):
     """
-    Run inference with the policy
+    Separate observations by team based on agent ID prefix
+    
+    Args:
+        observations: Dict of {agent_id: observation} for all agents
+    
+    Returns:
+        tuple: (red_observations, blue_observations)
+    """
+    red_observations = {}
+    blue_observations = {}
+    
+    for agent_id, obs in observations.items():
+        if agent_id.startswith('red'):
+            red_observations[agent_id] = obs
+        elif agent_id.startswith('blue'):
+            blue_observations[agent_id] = obs
+    
+    return red_observations, blue_observations
+
+def run_inference(num_episodes=1, max_steps=1000, map_size=16, render=False, save_gif=False, gif_path="render/inference_simulation.gif", scale_factor=20):
+    """
+    Run inference with team-based policies
     
     Args:
         num_episodes: Number of episodes to run
@@ -116,10 +132,6 @@ def run_inference(num_episodes=1, max_steps=1000, map_size=16, render=False, sav
         save_gif: Whether to save simulation as GIF
         gif_path: Path to save the GIF file
         scale_factor: Scale factor for GIF images (default 20)
-        use_dqn: Whether to use DQN policy (True) or random policy (False)
-        training: Whether to train the DQN agents during inference
-        load_models: Whether to load existing DQN models
-        use_autoregressive: Whether to use autoregressive model instead of regular DQN
     """
     # Create environment
     env = combined_arms_v6.parallel_env(
@@ -132,28 +144,6 @@ def run_inference(num_episodes=1, max_steps=1000, map_size=16, render=False, sav
         max_cycles=max_steps, 
         extra_features=False
     )
-    
-    # Initialize policy
-    if use_autoregressive:
-        policy = AutoRegressiveMultiAgentPolicy(env)
-        if load_models:
-            policy.load_models()
-            if render:
-                print("Loaded existing autoregressive models")
-        if render:
-            print("Using autoregressive policy with strategy embeddings")
-    elif use_dqn:
-        policy = MultiAgentDQNPolicy(env)
-        if load_models:
-            policy.load_models()
-            if render:
-                print("Loaded existing DQN models")
-        if render:
-            print("Using DQN policy with multi-agent learning")
-    else:
-        policy = RandomPolicy(env)
-        if render:
-            print("Using random policy")
     
     episode_stats = []
     
@@ -168,20 +158,10 @@ def run_inference(num_episodes=1, max_steps=1000, map_size=16, render=False, sav
         episode_reward = 0
         episode_length = 0
         episode_frames = []
-        prev_observations = None
-        prev_actions = None
         
         if render:
             print(f"Starting episode {episode + 1}")
             print(f"Initial agents: {len(env.agents)}")
-            if (use_dqn or use_autoregressive) and training:
-                stats = policy.get_training_stats()
-                if use_autoregressive:
-                    central_stats = stats['central_policy']
-                    print(f"Epsilon: {central_stats['epsilon']:.3f}")
-                else:
-                    avg_epsilon = np.mean([s['epsilon'] for s in stats.values()])
-                    print(f"Average epsilon: {avg_epsilon:.3f}")
         
         for step in range(max_steps):
             # Capture frame for GIF if requested
@@ -194,22 +174,20 @@ def run_inference(num_episodes=1, max_steps=1000, map_size=16, render=False, sav
                 img_scaled = img.resize((map_size * scale_factor, map_size * scale_factor), Image.NEAREST)
                 episode_frames.append(np.array(img_scaled))
             
-            # Get actions from policy
-            if use_autoregressive or use_dqn:
-                actions = policy.get_actions(observations, training=training)
-            else:
-                actions = policy.get_actions(observations)
+            # Separate observations by team
+            red_observations, blue_observations = separate_teams(observations)
+            
+            # Get actions from team policies
+            red_actions = policy_1(red_observations)
+            blue_actions = policy_2(blue_observations)
+            
+            # Combine actions from both teams
+            actions = {**red_actions, **blue_actions}
             
             # Step environment
             next_observations, rewards, terminations, truncations, _ = env.step(actions)
             
-            # Train agents if using DQN or autoregressive and training is enabled
-            if (use_dqn or use_autoregressive) and training and prev_observations is not None:
-                policy.step(prev_observations, prev_actions, rewards, observations, terminations)
-            
-            # Store current state for next iteration
-            prev_observations = observations.copy() if observations else None
-            prev_actions = actions.copy() if actions else None
+            # Update observations
             observations = next_observations
             
             # Update episode stats
@@ -220,15 +198,9 @@ def run_inference(num_episodes=1, max_steps=1000, map_size=16, render=False, sav
             if render and step % 100 == 0:
                 alive_agents = len([a for a in env.agents if not terminations.get(a, False)])
                 step_reward = sum(rewards.values())
-                print(f"  Step {step}: {alive_agents} agents alive, step reward: {step_reward:.3f}")
-                if (use_dqn or use_autoregressive) and training:
-                    stats = policy.get_training_stats()
-                    if use_autoregressive:
-                        central_stats = stats['central_policy']
-                        print(f"    Epsilon: {central_stats['epsilon']:.3f}, Buffer size: {central_stats['buffer_size']}")
-                    else:
-                        avg_buffer = np.mean([s['buffer_size'] for s in stats.values()])
-                        print(f"    Avg buffer size: {avg_buffer:.0f}")
+                red_alive = len([a for a in env.agents if a.startswith('red') and not terminations.get(a, False)])
+                blue_alive = len([a for a in env.agents if a.startswith('blue') and not terminations.get(a, False)])
+                print(f"  Step {step}: {alive_agents} agents alive ({red_alive} red, {blue_alive} blue), step reward: {step_reward:.3f}")
             
             # Check if episode is done
             if all(terminations.values()) or all(truncations.values()):
@@ -242,26 +214,24 @@ def run_inference(num_episodes=1, max_steps=1000, map_size=16, render=False, sav
         
         # Store episode statistics
         final_alive = len([a for a in env.agents if not terminations.get(a, False)])
+        final_red_alive = len([a for a in env.agents if a.startswith('red') and not terminations.get(a, False)])
+        final_blue_alive = len([a for a in env.agents if a.startswith('blue') and not terminations.get(a, False)])
+        
         episode_stats.append({
             'episode': episode + 1,
             'length': episode_length,
             'total_reward': episode_reward,
-            'final_alive_agents': final_alive
+            'final_alive_agents': final_alive,
+            'final_red_alive': final_red_alive,
+            'final_blue_alive': final_blue_alive
         })
         
         if render:
             print(f"Episode {episode + 1} stats:")
             print(f"  Length: {episode_length} steps")
             print(f"  Total reward: {episode_reward:.3f}")
-            print(f"  Final alive agents: {final_alive}")
+            print(f"  Final alive agents: {final_alive} ({final_red_alive} red, {final_blue_alive} blue)")
             print()
-    
-    # Save models if training was enabled
-    if (use_dqn or use_autoregressive) and training:
-        policy.save_models()
-        if render:
-            model_type = "autoregressive" if use_autoregressive else "DQN"
-            print(f"{model_type} models saved to 'models/' directory")
     
     env.close()
     
@@ -276,7 +246,7 @@ def run_inference(num_episodes=1, max_steps=1000, map_size=16, render=False, sav
 if __name__ == "__main__":
     import argparse
     
-    parser = argparse.ArgumentParser(description="Run MARL inference with DQN or random policy")
+    parser = argparse.ArgumentParser(description="Run MARL inference with team-based policies")
     parser.add_argument("--episodes", type=int, default=1, help="Number of episodes to run")
     parser.add_argument("--steps", type=int, default=1000, help="Maximum steps per episode")
     parser.add_argument("--map-size", type=int, default=16, help="Size of the map")
@@ -284,32 +254,12 @@ if __name__ == "__main__":
     parser.add_argument("--save-gif", action="store_true", help="Save simulation as GIF")
     parser.add_argument("--gif-path", type=str, default="render/inference_simulation.gif", help="Path to save GIF")
     parser.add_argument("--scale-factor", type=int, default=20, help="Scale factor for GIF images")
-    parser.add_argument("--use-dqn", action="store_true", help="Use DQN policy instead of random policy")
-    parser.add_argument("--use-autoregressive", action="store_true", help="Use autoregressive policy with strategy embeddings")
-    parser.add_argument("--no-training", action="store_true", help="Disable training for DQN (evaluation mode)")
-    parser.add_argument("--load-models", action="store_true", help="Load existing models from 'models/' directory")
     
     args = parser.parse_args()
     
-    # Determine policy type and training mode
-    use_dqn = args.use_dqn
-    use_autoregressive = args.use_autoregressive
-    training = not args.no_training
-    
-    if use_autoregressive:
-        policy_type = "autoregressive"
-    elif use_dqn:
-        policy_type = "DQN"
-    else:
-        policy_type = "random"
-    
-    mode = "training" if ((use_dqn or use_autoregressive) and training) else "evaluation"
-    
-    print(f"Running MARL inference with {policy_type} policy in {mode} mode...")
+    print(f"Running MARL inference with team-based policies...")
     if args.save_gif:
         print(f"Will save GIF to: {args.gif_path}")
-    if (use_dqn or use_autoregressive) and args.load_models:
-        print(f"Will attempt to load existing {policy_type} models")
     
     # Run inference
     stats = run_inference(
@@ -319,11 +269,7 @@ if __name__ == "__main__":
         render=args.render,
         save_gif=args.save_gif,
         gif_path=args.gif_path,
-        scale_factor=args.scale_factor,
-        use_dqn=use_dqn,
-        training=training,
-        load_models=args.load_models,
-        use_autoregressive=use_autoregressive
+        scale_factor=args.scale_factor
     )
     
     # Print summary
@@ -335,14 +281,17 @@ if __name__ == "__main__":
         print(f"Episode {stat['episode']}: "
               f"Length={stat['length']}, "
               f"Reward={stat['total_reward']:.2f}, "
-              f"Survivors={stat['final_alive_agents']}")
+              f"Survivors={stat['final_alive_agents']} "
+              f"({stat['final_red_alive']} red, {stat['final_blue_alive']} blue)")
     
     # Calculate averages
     avg_length = np.mean([s['length'] for s in stats])
     avg_reward = np.mean([s['total_reward'] for s in stats])
     avg_survivors = np.mean([s['final_alive_agents'] for s in stats])
+    avg_red_survivors = np.mean([s['final_red_alive'] for s in stats])
+    avg_blue_survivors = np.mean([s['final_blue_alive'] for s in stats])
     
     print(f"\nAverages:")
     print(f"  Length: {avg_length:.1f} steps")
     print(f"  Reward: {avg_reward:.2f}")
-    print(f"  Survivors: {avg_survivors:.1f}")
+    print(f"  Survivors: {avg_survivors:.1f} ({avg_red_survivors:.1f} red, {avg_blue_survivors:.1f} blue)")
