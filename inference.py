@@ -4,6 +4,10 @@ from PIL import Image
 import imageio
 import os
 from magent2.environments import combined_arms_v6
+from DQN import MultiAgentDQNPolicy
+
+# Global variable to store DQN policy for blue team
+blue_dqn_policy = True
 
 def policy_1(team_observations):
     """
@@ -23,7 +27,7 @@ def policy_1(team_observations):
 
 def policy_2(team_observations):
     """
-    Policy for blue team
+    Policy for blue team - using DQN
     
     Args:
         team_observations: Dict of {agent_id: observation} for blue team agents
@@ -31,11 +35,17 @@ def policy_2(team_observations):
     Returns:
         dict: {agent_id: action} for blue team agents
     """
-    team_actions = {}
-    for agent_id, obs in team_observations.items():
-        # Random policy - select action from 0 to 8 (9 total actions)
-        team_actions[agent_id] = random.randint(0, 8)
-    return team_actions
+    global blue_dqn_policy
+    
+    if blue_dqn_policy is None:
+        # If DQN policy is not initialized, use random policy as fallback
+        team_actions = {}
+        for agent_id, obs in team_observations.items():
+            team_actions[agent_id] = random.randint(0, 8)
+        return team_actions
+    
+    # Use DQN policy to get actions
+    return blue_dqn_policy.get_actions(team_observations, training=True)
 
 def state_to_rgb(state):
     """Convert environment state to RGB image with proper colors
@@ -120,7 +130,7 @@ def separate_teams(observations):
     
     return red_observations, blue_observations
 
-def run_inference(num_episodes=1, max_steps=1000, map_size=16, render=False, save_gif=False, gif_path="render/inference_simulation.gif", scale_factor=20):
+def run_inference(num_episodes=1, max_steps=1000, map_size=16, render=False, save_gif=False, gif_path="render/inference_simulation.gif", scale_factor=20, use_dqn_blue=True, load_models=False):
     """
     Run inference with team-based policies
     
@@ -132,7 +142,11 @@ def run_inference(num_episodes=1, max_steps=1000, map_size=16, render=False, sav
         save_gif: Whether to save simulation as GIF
         gif_path: Path to save the GIF file
         scale_factor: Scale factor for GIF images (default 20)
+        use_dqn_blue: Whether to use DQN for blue team (default True)
+        load_models: Whether to load existing DQN models
     """
+    global blue_dqn_policy
+    
     # Create environment
     env = combined_arms_v6.parallel_env(
         map_size=map_size, 
@@ -144,6 +158,24 @@ def run_inference(num_episodes=1, max_steps=1000, map_size=16, render=False, sav
         max_cycles=max_steps, 
         extra_features=False
     )
+    
+    # Initialize DQN policy for blue team if requested
+    if use_dqn_blue:
+        blue_dqn_policy = MultiAgentDQNPolicy(env)
+        if load_models:
+            try:
+                blue_dqn_policy.load_models()
+                if render:
+                    print("Loaded existing DQN models for blue team")
+            except:
+                if render:
+                    print("No existing models found, starting fresh")
+        if render:
+            print("Using DQN policy for blue team, random policy for red team")
+    else:
+        blue_dqn_policy = None
+        if render:
+            print("Using random policies for both teams")
     
     episode_stats = []
     
@@ -162,6 +194,9 @@ def run_inference(num_episodes=1, max_steps=1000, map_size=16, render=False, sav
         if render:
             print(f"Starting episode {episode + 1}")
             print(f"Initial agents: {len(env.agents)}")
+        
+        prev_observations = None
+        prev_actions = None
         
         for step in range(max_steps):
             # Capture frame for GIF if requested
@@ -186,6 +221,21 @@ def run_inference(num_episodes=1, max_steps=1000, map_size=16, render=False, sav
             
             # Step environment
             next_observations, rewards, terminations, truncations, _ = env.step(actions)
+            
+            # Train DQN policy if using it and we have previous experience
+            if use_dqn_blue and blue_dqn_policy is not None and prev_observations is not None:
+                # Separate previous observations by team for training
+                prev_red_obs, prev_blue_obs = separate_teams(prev_observations)
+                prev_red_actions = {k: v for k, v in prev_actions.items() if k.startswith('red')}
+                prev_blue_actions = {k: v for k, v in prev_actions.items() if k.startswith('blue')}
+                
+                # Train only the blue team DQN policy
+                if prev_blue_obs and blue_observations:
+                    blue_dqn_policy.step(prev_blue_obs, prev_blue_actions, rewards, blue_observations, terminations)
+            
+            # Store current state for next iteration
+            prev_observations = observations.copy() if observations else None
+            prev_actions = actions.copy() if actions else None
             
             # Update observations
             observations = next_observations
@@ -233,6 +283,12 @@ def run_inference(num_episodes=1, max_steps=1000, map_size=16, render=False, sav
             print(f"  Final alive agents: {final_alive} ({final_red_alive} red, {final_blue_alive} blue)")
             print()
     
+    # Save DQN models if training was used
+    if use_dqn_blue and blue_dqn_policy is not None:
+        blue_dqn_policy.save_models()
+        if render:
+            print("DQN models saved to 'models/' directory")
+    
     env.close()
     
     # Save GIF if requested
@@ -254,12 +310,21 @@ if __name__ == "__main__":
     parser.add_argument("--save-gif", action="store_true", help="Save simulation as GIF")
     parser.add_argument("--gif-path", type=str, default="render/inference_simulation.gif", help="Path to save GIF")
     parser.add_argument("--scale-factor", type=int, default=20, help="Scale factor for GIF images")
+    parser.add_argument("--use-dqn-blue", action="store_true", default=True, help="Use DQN policy for blue team (default: True)")
+    parser.add_argument("--no-dqn", action="store_true", help="Use random policies for both teams")
+    parser.add_argument("--load-models", action="store_true", help="Load existing DQN models")
     
     args = parser.parse_args()
     
-    print(f"Running MARL inference with team-based policies...")
+    # Determine if using DQN for blue team
+    use_dqn_blue = not args.no_dqn and args.use_dqn_blue
+    
+    policy_desc = "DQN for blue team, random for red team" if use_dqn_blue else "random policies for both teams"
+    print(f"Running MARL inference with team-based policies: {policy_desc}")
     if args.save_gif:
         print(f"Will save GIF to: {args.gif_path}")
+    if use_dqn_blue and args.load_models:
+        print("Will attempt to load existing DQN models")
     
     # Run inference
     stats = run_inference(
@@ -269,7 +334,9 @@ if __name__ == "__main__":
         render=args.render,
         save_gif=args.save_gif,
         gif_path=args.gif_path,
-        scale_factor=args.scale_factor
+        scale_factor=args.scale_factor,
+        use_dqn_blue=use_dqn_blue,
+        load_models=args.load_models
     )
     
     # Print summary
