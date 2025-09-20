@@ -14,7 +14,7 @@ import imageio
 from typing import Dict, Any, Optional
 
 from magent2.environments import combined_arms_v6
-from magent_sable_policy import MultiTeamSablePolicy
+from magent_sable_policy_fully_aligned import MultiTeamSablePolicyFullyAligned as MultiTeamSablePolicy
 
 
 def state_to_rgb(state):
@@ -26,7 +26,7 @@ def state_to_rgb(state):
     walls = state[:, :, 0]
     rgb_image[walls > 0] = [64, 64, 64]
     
-    # Red team agents (channels 1-4)
+    # Red team agents (channels 1-4)ㄇ
     red_colors = [
         [255, 0, 0],      # Red melee unit 1 - bright red
         [200, 0, 0],      # Red melee unit 2 - dark red  
